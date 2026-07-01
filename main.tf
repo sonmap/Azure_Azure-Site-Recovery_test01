@@ -329,7 +329,6 @@ resource "azurerm_recovery_services_vault" "dr" {
   location            = azurerm_resource_group.dr.location
   resource_group_name = azurerm_resource_group.dr.name
   sku                 = "Standard"
-  soft_delete_enabled = false
   tags                = var.tags
 }
 
@@ -422,7 +421,6 @@ resource "azurerm_site_recovery_replicated_vm" "primary" {
   network_interface {
     source_network_interface_id = azurerm_network_interface.primary_vm.id
     target_subnet_name          = azurerm_subnet.dr_web.name
-    test_subnet_name            = azurerm_subnet.dr_web.name
   }
 
   depends_on = [
