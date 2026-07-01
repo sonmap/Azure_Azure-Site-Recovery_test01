@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="820" viewBox="0 0 1400 820">
+  <defs>
+    <style>
+      .title { font: 700 34px Arial, sans-serif; fill: #172554; }
+      .subtitle { font: 600 18px Arial, sans-serif; fill: #334155; }
+      .section-title { font: 700 22px Arial, sans-serif; }
+      .label { font: 600 15px Arial, sans-serif; fill: #0f172a; }
+      .small { font: 13px Arial, sans-serif; fill: #334155; }
+      .tiny { font: 12px Arial, sans-serif; fill: #475569; }
+      .box { fill: #ffffff; stroke-width: 2; rx: 14; }
+      .inner { fill: #f8fafc; stroke: #94a3b8; stroke-dasharray: 6 4; stroke-width: 1.4; rx: 12; }
+      .blue { stroke: #2563eb; }
+      .red { stroke: #dc2626; }
+      .green { stroke: #16a34a; }
+      .gray { stroke: #64748b; }
+      .primary-fill { fill: #eff6ff; }
+      .dr-fill { fill: #fff1f2; }
+      .asr-fill { fill: #f0f9ff; }
+      .tm-fill { fill: #f5f3ff; }
+      .note-fill { fill: #f8fafc; }
+    </style>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#2563eb"/></marker>
+    <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#dc2626"/></marker>
+    <marker id="arrow-gray" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#64748b"/></marker>
+    <marker id="arrow-green" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#16a34a"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="1400" height="820" fill="#ffffff"/>
+  <text x="32" y="48" class="title">Azure Site Recovery DR Lab - Korea Central → Japan East</text>
+  <text x="32" y="80" class="subtitle">Primary service in Korea Central, disaster recovery in Japan East, same user URL through Azure Traffic Manager</text>
+
+  <rect x="30" y="115" width="500" height="490" class="box blue primary-fill"/>
+  <text x="60" y="154" class="section-title" fill="#1d4ed8">Primary Region: Korea Central</text>
+  <text x="60" y="181" class="small">기본 운영 리전 / active service side</text>
+  <rect x="55" y="205" width="450" height="335" class="inner"/>
+  <text x="80" y="236" class="label">VNet: vnet-asr-test01-krc</text>
+  <text x="80" y="258" class="small">Subnet: snet-web-krc / 10.10.0.0/26</text>
+
+  <rect x="85" y="310" width="105" height="82" rx="12" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="112" y="344" class="label">VM</text>
+  <text x="96" y="366" class="tiny">Ubuntu 20.04</text>
+  <text x="78" y="412" class="tiny">vm-asr-test01-web01-krc</text>
+
+  <rect x="248" y="302" width="120" height="96" rx="16" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="268" y="338" class="label">Public LB</text>
+  <text x="263" y="361" class="tiny">lb-asr-test01-krc</text>
+  <text x="274" y="382" class="tiny">/health probe</text>
+
+  <rect x="394" y="310" width="84" height="82" rx="12" fill="#e0f2fe" stroke="#0284c7"/>
+  <text x="418" y="344" class="label">NSG</text>
+  <text x="402" y="366" class="tiny">80, 22</text>
+
+  <rect x="245" y="435" width="128" height="56" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-dasharray="5 4"/>
+  <text x="265" y="459" class="label">Backend Pool</text>
+  <text x="265" y="479" class="tiny">be-asr-test01-krc</text>
+
+  <rect x="244" y="555" width="132" height="34" rx="8" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="259" y="577" class="small">Primary Public IP</text>
+
+  <line x1="190" y1="350" x2="248" y2="350" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-blue)"/>
+  <line x1="308" y1="398" x2="308" y2="435" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+  <line x1="308" y1="491" x2="308" y2="555" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+  <line x1="368" y1="350" x2="394" y2="350" stroke="#64748b" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow-gray)"/>
+
+  <rect x="565" y="145" width="250" height="415" class="box gray asr-fill"/>
+  <text x="617" y="184" class="section-title" fill="#0369a1">Azure Site Recovery</text>
+  <text x="617" y="209" class="small">복제 제어 / replication control</text>
+  <rect x="606" y="252" width="170" height="78" rx="14" fill="#e0f2fe" stroke="#0284c7"/>
+  <text x="630" y="285" class="label">Recovery Vault</text>
+  <text x="624" y="308" class="tiny">rsv-asr-test01-jpe</text>
+  <rect x="606" y="370" width="170" height="74" rx="14" fill="#ecfeff" stroke="#0891b2"/>
+  <text x="642" y="402" class="label">ASR Cache</text>
+  <text x="638" y="424" class="tiny">Storage Account</text>
+  <rect x="606" y="480" width="170" height="50" rx="12" fill="#ffffff" stroke="#94a3b8" stroke-dasharray="5 4"/>
+  <text x="626" y="512" class="small">Fabric / Container / Policy</text>
+
+  <line x1="530" y1="350" x2="565" y2="292" stroke="#64748b" stroke-width="2.5" stroke-dasharray="7 5" marker-end="url(#arrow-gray)"/>
+  <line x1="690" y1="330" x2="690" y2="370" stroke="#64748b" stroke-width="2.5" stroke-dasharray="7 5" marker-end="url(#arrow-gray)"/>
+  <line x1="815" y1="292" x2="850" y2="350" stroke="#64748b" stroke-width="2.5" stroke-dasharray="7 5" marker-end="url(#arrow-gray)"/>
+
+  <rect x="850" y="115" width="500" height="490" class="box red dr-fill"/>
+  <text x="900" y="154" class="section-title" fill="#b91c1c">DR Region: Japan East</text>
+  <text x="900" y="181" class="small">장애 복구 리전 / secondary service side</text>
+  <rect x="875" y="205" width="450" height="335" class="inner"/>
+  <text x="900" y="236" class="label">VNet: vnet-asr-test01-jpe</text>
+  <text x="900" y="258" class="small">Subnet: snet-web-jpe / 10.20.0.0/26</text>
+
+  <rect x="905" y="310" width="105" height="82" rx="12" fill="#fee2e2" stroke="#dc2626" stroke-dasharray="7 5"/>
+  <text x="928" y="344" class="label">DR VM</text>
+  <text x="916" y="366" class="tiny">ASR created</text>
+  <text x="902" y="412" class="tiny">asr-vm-asr-test01-web01</text>
+
+  <rect x="1068" y="302" width="120" height="96" rx="16" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="1088" y="338" class="label">Public LB</text>
+  <text x="1083" y="361" class="tiny">lb-asr-test01-jpe</text>
+  <text x="1094" y="382" class="tiny">/health probe</text>
+
+  <rect x="1214" y="310" width="84" height="82" rx="12" fill="#e0f2fe" stroke="#0284c7"/>
+  <text x="1238" y="344" class="label">NSG</text>
+  <text x="1222" y="366" class="tiny">80, 22</text>
+
+  <rect x="1065" y="435" width="128" height="56" rx="10" fill="#ffffff" stroke="#ef4444" stroke-dasharray="5 4"/>
+  <text x="1085" y="459" class="label">Backend Pool</text>
+  <text x="1085" y="479" class="tiny">be-asr-test01-jpe</text>
+
+  <rect x="1064" y="555" width="132" height="34" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+  <text x="1085" y="577" class="small">DR Public IP</text>
+
+  <line x1="1010" y1="350" x2="1068" y2="350" stroke="#dc2626" stroke-width="3" marker-end="url(#arrow-red)"/>
+  <line x1="1128" y1="398" x2="1128" y2="435" stroke="#dc2626" stroke-width="2.5" marker-end="url(#arrow-red)"/>
+  <line x1="1128" y1="491" x2="1128" y2="555" stroke="#dc2626" stroke-width="2.5" marker-end="url(#arrow-red)"/>
+  <line x1="1188" y1="350" x2="1214" y2="350" stroke="#64748b" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow-gray)"/>
+
+  <rect x="925" y="632" width="370" height="92" rx="14" fill="#fff7ed" stroke="#f97316"/>
+  <text x="950" y="662" class="label">Post-failover required step</text>
+  <text x="950" y="687" class="small">Attach recovered VM NIC to Japan East LB backend pool.</text>
+  <text x="950" y="710" class="small">복구 VM NIC를 일본 LB Backend Pool에 수동 연결</text>
+
+  <rect x="30" y="632" width="540" height="145" rx="14" fill="#f8fafc" stroke="#94a3b8"/>
+  <text x="58" y="664" class="section-title" fill="#334155">Traffic / Replication Legend</text>
+  <line x1="65" y1="698" x2="150" y2="698" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-blue)"/><text x="165" y="703" class="small">Normal traffic: Client → Traffic Manager → Korea Central LB</text>
+  <line x1="65" y1="728" x2="150" y2="728" stroke="#dc2626" stroke-width="3" marker-end="url(#arrow-red)"/><text x="165" y="733" class="small">Failover traffic: Client → Traffic Manager → Japan East LB</text>
+  <line x1="65" y1="758" x2="150" y2="758" stroke="#64748b" stroke-width="2.5" stroke-dasharray="7 5" marker-end="url(#arrow-gray)"/><text x="165" y="763" class="small">ASR replication and control flow</text>
+
+  <rect x="600" y="632" width="275" height="145" rx="14" fill="#f0fdf4" stroke="#22c55e"/>
+  <text x="625" y="664" class="section-title" fill="#15803d">Design notes</text>
+  <text x="625" y="695" class="small">• Same URL is maintained by Traffic Manager.</text>
+  <text x="625" y="718" class="small">• DR VM has no public IP.</text>
+  <text x="625" y="741" class="small">• nginx is configured by Ansible Run Command.</text>
+  <text x="625" y="764" class="small">• Ubuntu 20.04 LTS Gen2 used for ASR compatibility.</text>
+</svg>
