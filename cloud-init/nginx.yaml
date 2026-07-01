@@ -40,16 +40,16 @@ write_files:
           <h1>Azure ASR DR Test</h1>
           <p class="ok">nginx is running.</p>
           <p><b>Role:</b> ${role_label}</p>
-          <p><b>Azure region:</b> ${REGION}</p>
-          <p><b>VM name:</b> ${VM_NAME}</p>
-          <p><b>Private IP:</b> ${PRIVATE_IP}</p>
+          <p><b>Azure region:</b> $${REGION}</p>
+          <p><b>VM name:</b> $${VM_NAME}</p>
+          <p><b>Private IP:</b> $${PRIVATE_IP}</p>
           <p><b>Boot time:</b> $(date -Is)</p>
         </div>
       </body>
       </html>
       EOF
 
-      echo "ok $(date -Is) ${REGION} ${VM_NAME}" >/var/www/html/health
+      echo "ok $(date -Is) $${REGION} $${VM_NAME}" >/var/www/html/health
 
       systemctl enable nginx
       systemctl restart nginx
