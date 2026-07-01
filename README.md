@@ -1,64 +1,198 @@
-# Azure Site Recovery Test01 - Korea Central to Japan East
+# Azure Site Recovery DR Lab - Korea Central to Japan East
 
-이 저장소는 Azure VM 1대를 Korea Central(서울)에 만들고, nginx 웹 페이지를 올린 뒤 Azure Site Recovery(ASR)로 Japan East(일본) DR 테스트를 수행하기 위한 Terraform 샘플입니다.
+> Main language: English. Korean translation and notes are included after the English runbook.
 
-## 목표 구성
+This repository is a hands-on Azure Site Recovery lab for validating VM disaster recovery from Korea Central to Japan East. It provisions a small web workload, exposes it through Azure Standard Public Load Balancers, uses Azure Traffic Manager Priority routing for the same external URL, and enables Azure Site Recovery replication for a Linux VM.
 
-```text
-Normal
-Client URL
-  -> Azure Traffic Manager DNS
-  -> Korea Central Public Load Balancer
-  -> Korea Central VM / nginx
+The lab was validated through normal service access, ASR Test Failover, real Failover, manual backend pool attachment, Traffic Manager endpoint control, Failover Commit, and cleanup attempts. The README also documents the important troubleshooting findings from the lab.
 
-DR / Test Failover
-Client URL 동일
-  -> Azure Traffic Manager DNS
-  -> Japan East Public Load Balancer
-  -> ASR Test Failover 또는 Failover VM / nginx
+> Important: This is a learning and test repository. It is not a production landing zone. Production use requires private access design, WAF or Application Gateway, managed identity hardening, monitoring, alerting, backup policy, access control, and a formal failback procedure.
+
+---
+
+## Table of contents
+
+- [1. Architecture overview](#1-architecture-overview)
+- [2. What this repository creates](#2-what-this-repository-creates)
+- [3. Repository layout](#3-repository-layout)
+- [4. Prerequisites](#4-prerequisites)
+- [5. Deployment flow](#5-deployment-flow)
+- [6. Configure nginx with Ansible](#6-configure-nginx-with-ansible)
+- [7. Normal service validation](#7-normal-service-validation)
+- [8. ASR Test Failover runbook](#8-asr-test-failover-runbook)
+- [9. Real Failover runbook](#9-real-failover-runbook)
+- [10. Manual return to Korea Central](#10-manual-return-to-korea-central)
+- [11. Cleanup and deletion](#11-cleanup-and-deletion)
+- [12. Troubleshooting notes from the lab](#12-troubleshooting-notes-from-the-lab)
+- [13. Korean guide](#13-korean-guide)
+
+---
+
+## 1. Architecture overview
+
+### 1.1 Normal state
+
+```mermaid
+flowchart TB
+    U[Client or test browser] --> TM[Azure Traffic Manager<br/>Priority routing<br/>same FQDN]
+    TM --> KRC_LB[Korea Central<br/>Standard Public Load Balancer]
+    KRC_LB --> KRC_VM[Korea Central Linux VM<br/>nginx health endpoint]
+
+    subgraph KRC[Korea Central - Primary]
+      KRC_LB
+      KRC_VM
+      KRC_VNET[VNet and web subnet]
+    end
+
+    subgraph RSV[Recovery Services Vault]
+      ASR[ASR replication policy<br/>fabric / container / mapping]
+    end
+
+    KRC_VM -. replicated by ASR .-> ASR
 ```
 
-> 여기서 ALB는 Azure Standard Public Load Balancer 기준입니다. Application Gateway를 쓰는 구조로 바꾸려면 `azurerm_lb` 부분을 `azurerm_application_gateway`로 대체하면 됩니다.
+In the normal state, the public URL resolves to the Korea Central Load Balancer. The backend VM serves nginx on port 80 and exposes `/health` for both Load Balancer and Traffic Manager monitoring.
 
-## 리전
+### 1.2 DR state after ASR Test Failover or Failover
 
-| 역할 | Azure region |
-|---|---|
-| Primary | `koreacentral` |
-| DR | `japaneast` |
+```mermaid
+flowchart TB
+    U[Client or test browser] --> TM[Azure Traffic Manager<br/>same FQDN]
+    TM --> JPE_LB[Japan East<br/>Standard Public Load Balancer]
+    JPE_LB --> JPE_VM[ASR recovered VM<br/>no public IP<br/>private backend only]
 
-## 포함 리소스
+    subgraph JPE[Japan East - DR]
+      JPE_LB
+      JPE_VM
+      JPE_VNET[VNet and web subnet]
+    end
+```
 
-- Korea Central Resource Group / VNet / Subnet
-- Japan East Resource Group / VNet / Subnet
-- Korea Central nginx VM
-- Korea Central Public Load Balancer
-- Japan East Public Load Balancer
-- Azure Traffic Manager Priority routing
-- Recovery Services Vault
-- ASR Fabric / Protection Container / Replication Policy / Mapping
-- ASR replicated VM 기본 리소스
-- 장애테스트 후 Japan East LB Backend Pool 연결 스크립트
+The recovered Japan East VM does not require a public IP. It is reached through the Japan East Standard Public Load Balancer. After ASR creates the recovered VM, its NIC must be attached to the Japan East LB backend pool.
 
-## 실행 순서
+### 1.3 Traffic Manager behavior
 
-### 1. 변수 파일 준비
+```mermaid
+flowchart LR
+    DNS[Client DNS query] --> TM[Traffic Manager profile]
+    TM -->|Priority 1 and healthy| KRC[Primary endpoint<br/>Korea Central LB public IP]
+    TM -->|Primary disabled or unhealthy| JPE[DR endpoint<br/>Japan East LB public IP]
+```
+
+Traffic Manager is DNS-based. It is not an HTTP proxy and it does not sit in the data path after DNS resolution. The user traffic goes directly to the returned public IP address.
+
+---
+
+## 2. What this repository creates
+
+| Area | Resource | Region | Notes |
+|---|---|---|---|
+| Primary compute | Linux VM | Korea Central | nginx is configured later by Ansible Run Command |
+| Primary network | VNet, subnet, NSG | Korea Central | HTTP 80 and controlled SSH rule |
+| Primary frontend | Standard Public Load Balancer | Korea Central | HTTP rule and `/health` probe |
+| DR network | VNet, subnet, NSG | Japan East | Used by recovered VM |
+| DR frontend | Standard Public Load Balancer | Japan East | Backend is attached after failover |
+| DNS routing | Traffic Manager | Global | Priority routing, TTL 30 seconds |
+| ASR | Recovery Services Vault | Japan East | Stores ASR configuration |
+| ASR | Fabric and protection containers | Korea Central and Japan East | Source and target ASR topology |
+| ASR | Replication policy | Japan East vault | 24h retention and 4h app-consistent frequency |
+| ASR | Network and container mapping | Korea Central to Japan East | Required for Azure-to-Azure replication |
+| ASR | Replicated VM | Korea Central to Japan East | Main protected item |
+| Automation | Ansible Run Command | Control machine to Azure VM | Installs nginx and writes health page |
+
+### Important implementation choices
+
+- The lab uses Azure Standard Public Load Balancer, not Application Gateway.
+- Standard LB outbound rules are included because Standard LB does not provide default outbound internet access.
+- The VM image is Ubuntu 20.04 LTS Gen2 on purpose. During validation, Ubuntu 22.04 latest booted with a 6.8 Azure kernel and ASR Mobility Service rejected that kernel.
+- Terraform provisions infrastructure and ASR. Application setup is intentionally handled by Ansible, not cloud-init.
+
+---
+
+## 3. Repository layout
+
+```text
+.
+├── main.tf
+├── lb-outbound.tf
+├── variables.tf
+├── outputs.tf
+├── versions.tf
+├── terraform.tfvars.example
+├── cloud-init/
+│   └── nginx.yaml
+├── ansible/
+│   ├── playbooks/
+│   │   └── configure_nginx_azure_run_command.yml
+│   └── templates/
+│       └── configure_nginx.sh.j2
+├── scripts/
+│   ├── attach_recovered_vm_to_jpe_lb.sh
+│   ├── asr_status.sh
+│   ├── run_ansible_primary.sh
+│   ├── run_ansible_vm.sh
+│   └── test_dr_flow.sh
+└── RUNBOOK-ANSIBLE.md
+```
+
+`cloud-init/nginx.yaml` is kept as a historical reference, but the current validated path is Ansible through Azure VM Run Command.
+
+---
+
+## 4. Prerequisites
+
+Install and authenticate the following on the control machine.
+
+```bash
+az version
+terraform version
+ansible --version
+jq --version
+curl --version
+```
+
+Azure login:
+
+```bash
+az login
+az account show -o table
+```
+
+Install or update the Site Recovery extension:
+
+```bash
+az extension add --name site-recovery --upgrade
+```
+
+Create or confirm an SSH public key:
+
+```bash
+ssh-keygen -t rsa -b 4096 -C asr-test01
+cat ~/.ssh/id_rsa.pub
+```
+
+Prepare `terraform.tfvars`:
 
 ```bash
 cp terraform.tfvars.example terraform.tfvars
 vi terraform.tfvars
 ```
 
-최소 수정 항목:
+Minimum values:
 
 ```hcl
-admin_username     = "azureuser"
-admin_source_cidr  = "x.x.x.x/32"
-ssh_public_key     = "ssh-rsa AAAA..."
+admin_username = "azureuser"
+admin_source_cidr = "x.x.x.x/32"
+ssh_public_key = "ssh-rsa AAAA..."
 traffic_manager_relative_name = "sonmap-asr-test01"
+vm_size = "Standard_D2s_v3"
 ```
 
-### 2. Terraform 배포
+If you do not have a stable public admin IP for SSH, keep SSH access limited to your trusted private or corporate range. Avoid `0.0.0.0/0` for SSH.
+
+---
+
+## 5. Deployment flow
 
 ```bash
 terraform init
@@ -68,52 +202,135 @@ terraform plan -out tfplan
 terraform apply tfplan
 ```
 
-### 3. 정상 서비스 확인
-
-```bash
-terraform output service_url
-terraform output traffic_manager_fqdn
-curl -v "http://$(terraform output -raw traffic_manager_fqdn)/health"
-curl -v "http://$(terraform output -raw traffic_manager_fqdn)/"
-```
-
-정상 상태에서는 Traffic Manager가 Korea Central Public LB로 응답합니다.
-
-### 4. ASR 복제 상태 확인
-
-Azure Portal 기준:
+Expected outputs include:
 
 ```text
-Recovery Services vault
-  -> Replicated items
-  -> VM 상태 Protected 확인
+service_url
+traffic_manager_fqdn
+primary_lb_public_ip
+jpe_lb_public_ip
+primary_vm_name
+primary_resource_group_name
+dr_resource_group_name
+recovery_services_vault_name
+primary_lb_name
+primary_lb_backend_pool_name
+dr_lb_name
+dr_lb_backend_pool_name
 ```
 
-CLI 확인 예시는 `scripts/asr_status.sh`를 사용합니다.
+During validation, an example deployment produced values similar to:
+
+```text
+Primary LB IP: 20.200.209.69
+Japan LB IP: 52.253.109.90
+Traffic Manager FQDN: sonmap-asr-test01.trafficmanager.net
+Primary VM: vm-asr-test01-web01-krc
+Recovered DR VM after failover: asr-vm-asr-test01-web01
+```
+
+Actual values change per deployment.
+
+---
+
+## 6. Configure nginx with Ansible
+
+The Terraform VM does not use cloud-init for the application. Configure nginx after provisioning.
 
 ```bash
 chmod +x scripts/*.sh
-./scripts/asr_status.sh \
-  $(terraform output -raw dr_resource_group_name) \
-  $(terraform output -raw recovery_services_vault_name)
+./scripts/run_ansible_primary.sh
 ```
 
-### 5. 장애 테스트
+The Ansible playbook runs locally and calls Azure VM Run Command. The VM does not need a public IP.
 
-테스트 목적이면 먼저 ASR `Test failover`를 수행합니다.
+Manual equivalent:
+
+```bash
+az vm run-command invoke \
+  --resource-group $(terraform output -raw primary_resource_group_name) \
+  --name $(terraform output -raw primary_vm_name) \
+  --command-id RunShellScript \
+  --scripts 'sudo apt-get update -y; sudo apt-get install -y nginx curl jq; echo ok KoreaCentral manual restore | sudo tee /var/www/html/health; sudo systemctl enable nginx; sudo systemctl restart nginx' \
+  -o table
+```
+
+---
+
+## 7. Normal service validation
+
+Primary LB health:
+
+```bash
+curl -m 10 -v http://$(terraform output -raw primary_lb_public_ip)/health
+```
+
+Traffic Manager health:
+
+```bash
+curl -m 10 -v http://$(terraform output -raw traffic_manager_fqdn)/health
+```
+
+Expected response from Korea Central:
+
+```text
+HTTP/1.1 200 OK
+ok ... KoreaCentral vm-asr-test01-web01-krc
+```
+
+Check ASR protected item:
+
+```bash
+DR_RG=$(terraform output -raw dr_resource_group_name)
+VAULT=$(terraform output -raw recovery_services_vault_name)
+
+az site-recovery protected-item list \
+  --resource-group "$DR_RG" \
+  --vault-name "$VAULT" \
+  --fabric-name asr-fabric-krc \
+  --protection-container asr-pc-krc \
+  --query '[].{Name:name,FriendlyName:properties.friendlyName,State:properties.protectionState,Health:properties.replicationHealth}' \
+  -o table
+```
+
+---
+
+## 8. ASR Test Failover runbook
+
+Use Test Failover first for DR drills. Test Failover creates a temporary DR VM and does not commit production failover.
+
+Portal path:
 
 ```text
 Recovery Services vault
   -> Replicated items
-  -> Source VM 선택
+  -> asr-vm-asr-test01-web01
   -> Test failover
-  -> Target: Japan East test VNet/Subnet 선택
 ```
 
-Test failover VM이 Japan East에 생성된 뒤 아래 스크립트로 Japan East Public LB Backend Pool에 NIC를 연결합니다.
+Use:
+
+```text
+Target region: Japan East
+Target VNet: vnet-asr-test01-jpe
+Target subnet: snet-web-jpe
+Recovery point: Latest processed
+```
+
+After the recovered VM appears, list DR VMs:
 
 ```bash
-chmod +x scripts/*.sh
+az vm list \
+  --resource-group $(terraform output -raw dr_resource_group_name) \
+  --show-details \
+  -o table
+```
+
+The VM may not have a public IP. That is expected. It should be reached through the Japan East Load Balancer.
+
+Attach the recovered VM NIC to the Japan East LB backend pool:
+
+```bash
 ./scripts/attach_recovered_vm_to_jpe_lb.sh \
   -g $(terraform output -raw dr_resource_group_name) \
   -v <RECOVERED_VM_NAME> \
@@ -121,47 +338,606 @@ chmod +x scripts/*.sh
   -p $(terraform output -raw dr_lb_backend_pool_name)
 ```
 
-그 후 Japan East LB 직접 확인:
+Check Japan East LB:
 
 ```bash
-curl -v "http://$(terraform output -raw jpe_lb_public_ip)/health"
+curl -m 10 -v http://$(terraform output -raw jpe_lb_public_ip)/health
 ```
 
-Primary 장애 또는 Traffic Manager endpoint 상태 변경 후 동일 URL 확인:
+To test Traffic Manager DR routing, either stop nginx on Primary or disable the Primary Traffic Manager endpoint.
+
+Stop Primary nginx:
 
 ```bash
-curl -v "http://$(terraform output -raw traffic_manager_fqdn)/"
+az vm run-command invoke \
+  --resource-group $(terraform output -raw primary_resource_group_name) \
+  --name $(terraform output -raw primary_vm_name) \
+  --command-id RunShellScript \
+  --scripts 'sudo systemctl stop nginx' \
+  -o table
 ```
 
-또는 검증 스크립트:
+Disable Primary endpoint:
 
 ```bash
-./scripts/test_dr_flow.sh \
-  $(terraform output -raw traffic_manager_fqdn) \
-  $(terraform output -raw jpe_lb_public_ip)
+TM_RG=$(terraform output -raw primary_resource_group_name)
+TM_PROFILE=$(az network traffic-manager profile list -g "$TM_RG" --query '[0].name' -o tsv)
+
+az network traffic-manager endpoint update \
+  -g "$TM_RG" \
+  --profile-name "$TM_PROFILE" \
+  --name ep-krc-primary-lb \
+  --type azureEndpoints \
+  --endpoint-status Disabled
 ```
 
-## 같은 URL 유지 방식
-
-이 샘플은 외부 URL을 VM이나 LB Public IP에 직접 붙이지 않고 Traffic Manager FQDN에 붙입니다.
-
-운영 도메인이 있으면 CNAME을 아래로 연결합니다.
+Cleanup Test Failover:
 
 ```text
-www.example.com CNAME <traffic_manager_fqdn>
+Recovery Services vault
+  -> Replicated items
+  -> asr-vm-asr-test01-web01
+  -> Cleanup test failover
 ```
 
-Traffic Manager는 Priority routing을 사용합니다.
+After cleanup, the Japan LB may time out because the temporary DR VM was deleted. That is normal.
 
-- Priority 1: Korea Central Public Load Balancer
-- Priority 2: Japan East Public Load Balancer
+---
 
-Korea Central이 비정상이 되고 Japan East가 정상 응답하면 같은 URL로 Japan East 서비스가 응답합니다.
+## 9. Real Failover runbook
 
-## 주의 사항
+Real Failover is not a drill. It creates the actual DR VM and changes the ASR protected item state.
 
-1. ASR는 복제 설정 후 즉시 failover가 되는 것이 아니라 초기 복제 완료가 필요합니다.
-2. Test failover VM은 ASR가 생성하므로, 생성 후 Japan East LB Backend Pool에 NIC를 연결해야 합니다.
-3. 실제 운영에서는 DNS TTL, 헬스체크 경로, 인증서, WAF/Application Gateway 여부를 별도 설계해야 합니다.
-4. VM boot 시 nginx가 자동 기동되도록 cloud-init과 systemd를 구성했습니다.
-5. 이 샘플은 학습/테스트 목적입니다. 운영에서는 Key Vault, Bastion, Private Access, Azure Policy, Monitor Alert, Backup 정책을 추가하세요.
+High-level flow:
+
+```mermaid
+flowchart TB
+    A[Start real Failover] --> B[Japan East VM created]
+    B --> C[Attach recovered NIC to Japan LB backend pool]
+    C --> D[Validate Japan LB health]
+    D --> E[Traffic Manager routes to Japan]
+    E --> F[Failover Commit]
+    F --> G[Japan East becomes committed DR operating side]
+```
+
+Portal path:
+
+```text
+Recovery Services vault
+  -> Replicated items
+  -> asr-vm-asr-test01-web01
+  -> Failover
+```
+
+Recommended lab choices:
+
+```text
+Recovery point: Latest processed
+Shut down source VM before failover: lab dependent
+```
+
+After Failover, the DR VM name observed in this lab was:
+
+```text
+asr-vm-asr-test01-web01
+```
+
+Attach it to the Japan East LB:
+
+```bash
+./scripts/attach_recovered_vm_to_jpe_lb.sh \
+  -g $(terraform output -raw dr_resource_group_name) \
+  -v asr-vm-asr-test01-web01 \
+  -l $(terraform output -raw dr_lb_name) \
+  -p $(terraform output -raw dr_lb_backend_pool_name)
+```
+
+Commit Failover with Azure CLI:
+
+```bash
+DR_RG=$(terraform output -raw dr_resource_group_name)
+VAULT=$(terraform output -raw recovery_services_vault_name)
+ITEM_NAME=asr-vm-asr-test01-web01
+
+az site-recovery protected-item failover-commit \
+  --resource-group "$DR_RG" \
+  --vault-name "$VAULT" \
+  --fabric-name asr-fabric-krc \
+  --protection-container asr-pc-krc \
+  -n "$ITEM_NAME"
+```
+
+In this lab, Commit completed successfully and the protected item reached:
+
+```text
+State  = UnplannedFailoverCommitted
+Health = Normal
+```
+
+---
+
+## 10. Manual return to Korea Central
+
+A formal ASR failback requires Re-protect from Japan East to Korea Central, wait for Healthy replication, Planned Failover back to Korea, Commit, and then Re-protect again from Korea to Japan.
+
+During this lab, Azure CLI `reprotect` provider details were difficult to satisfy because the Site Recovery extension expected a nested `a2-a` schema and disk details. For a clean production-style failback, use the Azure Portal for Re-protect and failback.
+
+For a lab-only manual service return, use the following operational workaround:
+
+```mermaid
+flowchart TB
+    A[Japan East is currently active] --> B[Start Korea Central VM]
+    B --> C[Start or reinstall nginx]
+    C --> D[Ensure Korea VM NIC is in Korea LB backend pool]
+    D --> E[Enable Traffic Manager Korea endpoint]
+    E --> F[Disable Traffic Manager Japan endpoint]
+    F --> G[Validate same FQDN returns Korea]
+    G --> H[Deallocate Japan VM]
+```
+
+Set variables:
+
+```bash
+cd ~/Azure_Azure-Site-Recovery_test01
+
+PRIMARY_RG=$(terraform output -raw primary_resource_group_name)
+DR_RG=$(terraform output -raw dr_resource_group_name)
+PRIMARY_VM=$(terraform output -raw primary_vm_name)
+DR_VM=asr-vm-asr-test01-web01
+```
+
+Start Korea VM:
+
+```bash
+az vm start -g "$PRIMARY_RG" -n "$PRIMARY_VM"
+```
+
+Start nginx or reinstall if needed:
+
+```bash
+az vm run-command invoke \
+  -g "$PRIMARY_RG" \
+  -n "$PRIMARY_VM" \
+  --command-id RunShellScript \
+  --scripts 'sudo systemctl start nginx || true; sudo systemctl enable nginx || true; if ! command -v nginx >/dev/null 2>&1; then sudo apt-get update -y && sudo apt-get install -y nginx; fi; echo ok KoreaCentral manual restore | sudo tee /var/www/html/health; sudo systemctl restart nginx' \
+  -o table
+```
+
+Ensure the Korea VM NIC is attached to the Korea LB backend pool:
+
+```bash
+NIC_ID=$(az vm show -g "$PRIMARY_RG" -n "$PRIMARY_VM" --query 'networkProfile.networkInterfaces[0].id' -o tsv)
+NIC_NAME=$(basename "$NIC_ID")
+
+az network nic ip-config address-pool add \
+  -g "$PRIMARY_RG" \
+  --nic-name "$NIC_NAME" \
+  --ip-config-name ipconfig1 \
+  --lb-name $(terraform output -raw primary_lb_name) \
+  --address-pool $(terraform output -raw primary_lb_backend_pool_name) || true
+```
+
+Fix Traffic Manager endpoint status:
+
+```bash
+TM_RG="$PRIMARY_RG"
+TM_PROFILE=$(az network traffic-manager profile list -g "$TM_RG" --query '[0].name' -o tsv)
+
+az network traffic-manager endpoint update \
+  -g "$TM_RG" \
+  --profile-name "$TM_PROFILE" \
+  --name ep-krc-primary-lb \
+  --type azureEndpoints \
+  --endpoint-status Enabled
+
+az network traffic-manager endpoint update \
+  -g "$TM_RG" \
+  --profile-name "$TM_PROFILE" \
+  --name ep-jpe-dr-lb \
+  --type azureEndpoints \
+  --endpoint-status Disabled
+```
+
+If the CLI misinterprets `--profile-name`, set the variables explicitly:
+
+```bash
+TM_RG=rg-asr-test01-krc
+TM_PROFILE=tm-asr-test01-dk9p9
+```
+
+Validate Korea service:
+
+```bash
+curl -m 10 -v http://$(terraform output -raw primary_lb_public_ip)/health
+curl -m 10 -v http://$(terraform output -raw traffic_manager_fqdn)/health
+nslookup $(terraform output -raw traffic_manager_fqdn)
+```
+
+After Korea is confirmed, deallocate Japan VM:
+
+```bash
+az vm deallocate -g "$DR_RG" -n "$DR_VM"
+```
+
+---
+
+## 11. Cleanup and deletion
+
+### 11.1 Standard cleanup after Test Failover
+
+```text
+Recovery Services vault
+  -> Replicated items
+  -> asr-vm-asr-test01-web01
+  -> Cleanup test failover
+```
+
+### 11.2 Delete lab after real Failover Commit
+
+If the protected item cannot be removed because the source VM is deallocated, start the Korea VM first:
+
+```bash
+PRIMARY_RG=$(terraform output -raw primary_resource_group_name)
+PRIMARY_VM=$(terraform output -raw primary_vm_name)
+az vm start -g "$PRIMARY_RG" -n "$PRIMARY_VM"
+```
+
+Then try to remove the ASR protected item:
+
+```bash
+DR_RG=$(terraform output -raw dr_resource_group_name)
+VAULT=$(terraform output -raw recovery_services_vault_name)
+ITEM_NAME=asr-vm-asr-test01-web01
+
+az site-recovery protected-item remove \
+  -g "$DR_RG" \
+  --vault-name "$VAULT" \
+  --fabric-name asr-fabric-krc \
+  --protection-container asr-pc-krc \
+  -n "$ITEM_NAME"
+```
+
+If remove fails and this is only a lab, use forced delete:
+
+```bash
+az site-recovery protected-item delete \
+  -g "$DR_RG" \
+  --vault-name "$VAULT" \
+  --fabric-name asr-fabric-krc \
+  --protection-container asr-pc-krc \
+  -n "$ITEM_NAME"
+```
+
+Then remove the ASR replicated VM from Terraform state and destroy:
+
+```bash
+terraform state rm azurerm_site_recovery_replicated_vm.primary 2>/dev/null || true
+terraform destroy -auto-approve
+```
+
+If anything remains, delete the resource groups:
+
+```bash
+PRIMARY_RG=$(terraform output -raw primary_resource_group_name 2>/dev/null || echo rg-asr-test01-krc)
+DR_RG=$(terraform output -raw dr_resource_group_name 2>/dev/null || echo rg-asr-test01-jpe)
+
+az group delete --name "$PRIMARY_RG" --yes --no-wait
+az group delete --name "$DR_RG" --yes --no-wait
+
+az group wait --deleted --name "$PRIMARY_RG"
+az group wait --deleted --name "$DR_RG"
+```
+
+Final check:
+
+```bash
+az group exists --name "$PRIMARY_RG"
+az group exists --name "$DR_RG"
+```
+
+Expected:
+
+```text
+false
+false
+```
+
+---
+
+## 12. Troubleshooting notes from the lab
+
+### 12.1 Git clone could not resolve github.com
+
+Symptom:
+
+```text
+Could not resolve host: github.com
+```
+
+Check DNS and proxy:
+
+```bash
+ping -c 3 8.8.8.8
+getent hosts github.com
+nslookup github.com
+cat /etc/resolv.conf
+curl -I https://github.com
+```
+
+### 12.2 `test_subnet_name` unsupported
+
+The AzureRM provider did not support `test_subnet_name` for `azurerm_site_recovery_replicated_vm`. Remove that argument.
+
+### 12.3 Standard LB outbound rule required `disable_outbound_snat = true`
+
+When the same frontend IP configuration is referenced by an outbound rule, the inbound LB rule must disable outbound SNAT.
+
+```hcl
+disable_outbound_snat = true
+```
+
+### 12.4 VM SKU unavailable in Korea Central
+
+`Standard_B2s` was not available in Korea Central during validation. Use:
+
+```hcl
+vm_size = "Standard_D2s_v3"
+```
+
+### 12.5 ASR Mobility Service rejected Ubuntu 22.04 latest kernel
+
+ASR failed with a 539 error because the Mobility Service version did not support the source VM kernel `6.8.0-1059-azure`. The lab was changed to Ubuntu 20.04 LTS Gen2.
+
+### 12.6 DR VM has no public IP
+
+This is expected. Use the Japan East Load Balancer public IP:
+
+```bash
+curl -v http://$(terraform output -raw jpe_lb_public_ip)/health
+```
+
+### 12.7 Failover Commit CLI option
+
+The correct option in the tested CLI extension was `-n` or `--replicated-protected-item-name`.
+
+```bash
+az site-recovery protected-item failover-commit \
+  -g "$DR_RG" \
+  --vault-name "$VAULT" \
+  --fabric-name asr-fabric-krc \
+  --protection-container asr-pc-krc \
+  -n asr-vm-asr-test01-web01
+```
+
+### 12.8 Re-protect CLI schema issues
+
+The CLI extension reported `a2-a` as the expected provider details object. Manual JSON attempts may still fail depending on extension version. Portal Re-protect is recommended for this lab.
+
+### 12.9 Disable replication failed because VM was deallocated
+
+Symptom:
+
+```text
+Disable replication requires action within the VM which thus requires VM to be in running power status.
+```
+
+Fix:
+
+```bash
+az vm start -g "$PRIMARY_RG" -n "$PRIMARY_VM"
+```
+
+Then retry ASR remove/delete.
+
+### 12.10 Traffic Manager endpoint update ResourceNotFound
+
+If the error path contains `trafficmanagerprofiles/azureEndpoints`, the `TM_PROFILE` variable is probably empty. Set it explicitly.
+
+```bash
+TM_RG=rg-asr-test01-krc
+TM_PROFILE=tm-asr-test01-dk9p9
+```
+
+---
+
+## 13. Korean guide
+
+### 13.1 목적
+
+이 저장소는 Azure Site Recovery를 이용해 Korea Central VM을 Japan East로 복제하고, 장애 시 같은 URL로 DR 리전에 접속되는지 확인하기 위한 실습용 Terraform/Ansible 예제입니다.
+
+핵심 구조는 아래와 같습니다.
+
+```text
+사용자
+  -> Azure Traffic Manager
+  -> Korea Central Public Load Balancer
+  -> Korea Central VM / nginx
+
+장애 또는 Failover 후
+사용자
+  -> Azure Traffic Manager
+  -> Japan East Public Load Balancer
+  -> ASR로 생성된 Japan East VM / nginx
+```
+
+여기서 LB는 Azure Standard Public Load Balancer입니다. Application Gateway가 아닙니다.
+
+### 13.2 주요 검증 내용
+
+이번 실습에서 확인한 내용입니다.
+
+```text
+1. Terraform apply 성공
+2. Korea Central VM 생성
+3. Ansible Run Command로 nginx 설치
+4. Primary LB /health 정상 응답
+5. Traffic Manager /health 정상 응답
+6. ASR 복제 구성
+7. Test Failover 후 Japan East VM 생성
+8. Japan East VM NIC를 Japan LB Backend Pool에 연결
+9. Japan LB /health 정상 응답
+10. 실제 Failover 수행
+11. Failover Commit 성공
+12. 수동으로 서울 VM 기동 및 Traffic Manager 서울 전환 절차 확인
+13. 삭제 시 ASR protected item 제거 필요 확인
+```
+
+### 13.3 실행 순서
+
+```bash
+cp terraform.tfvars.example terraform.tfvars
+vi terraform.tfvars
+
+terraform init
+terraform fmt -recursive
+terraform validate
+terraform plan -out tfplan
+terraform apply tfplan
+```
+
+nginx 설정:
+
+```bash
+chmod +x scripts/*.sh
+./scripts/run_ansible_primary.sh
+```
+
+정상 확인:
+
+```bash
+curl -m 10 -v http://$(terraform output -raw primary_lb_public_ip)/health
+curl -m 10 -v http://$(terraform output -raw traffic_manager_fqdn)/health
+```
+
+### 13.4 Test Failover
+
+Portal에서 수행합니다.
+
+```text
+Recovery Services vault
+  -> Replicated items
+  -> asr-vm-asr-test01-web01
+  -> Test failover
+```
+
+Japan East VM이 생성되면 LB에 연결합니다.
+
+```bash
+./scripts/attach_recovered_vm_to_jpe_lb.sh \
+  -g $(terraform output -raw dr_resource_group_name) \
+  -v <RECOVERED_VM_NAME> \
+  -l $(terraform output -raw dr_lb_name) \
+  -p $(terraform output -raw dr_lb_backend_pool_name)
+```
+
+Japan LB 확인:
+
+```bash
+curl -m 10 -v http://$(terraform output -raw jpe_lb_public_ip)/health
+```
+
+### 13.5 실제 Failover와 Commit
+
+실제 Failover는 테스트가 아니라 DR 전환입니다. Failover 후 검증이 끝나면 Commit합니다.
+
+```bash
+DR_RG=$(terraform output -raw dr_resource_group_name)
+VAULT=$(terraform output -raw recovery_services_vault_name)
+
+az site-recovery protected-item failover-commit \
+  -g "$DR_RG" \
+  --vault-name "$VAULT" \
+  --fabric-name asr-fabric-krc \
+  --protection-container asr-pc-krc \
+  -n asr-vm-asr-test01-web01
+```
+
+성공 상태:
+
+```text
+State  = UnplannedFailoverCommitted
+Health = Normal
+```
+
+### 13.6 수동으로 서울로 서비스 전환
+
+ASR 정식 Failback 대신 실습 환경에서 수동으로 서울을 다시 올리는 절차입니다.
+
+```bash
+PRIMARY_RG=$(terraform output -raw primary_resource_group_name)
+DR_RG=$(terraform output -raw dr_resource_group_name)
+PRIMARY_VM=$(terraform output -raw primary_vm_name)
+DR_VM=asr-vm-asr-test01-web01
+
+az vm start -g "$PRIMARY_RG" -n "$PRIMARY_VM"
+
+az vm run-command invoke \
+  -g "$PRIMARY_RG" \
+  -n "$PRIMARY_VM" \
+  --command-id RunShellScript \
+  --scripts 'sudo systemctl start nginx; sudo systemctl enable nginx' \
+  -o table
+```
+
+Traffic Manager를 서울로 전환:
+
+```bash
+TM_RG="$PRIMARY_RG"
+TM_PROFILE=$(az network traffic-manager profile list -g "$TM_RG" --query '[0].name' -o tsv)
+
+az network traffic-manager endpoint update \
+  -g "$TM_RG" \
+  --profile-name "$TM_PROFILE" \
+  --name ep-krc-primary-lb \
+  --type azureEndpoints \
+  --endpoint-status Enabled
+
+az network traffic-manager endpoint update \
+  -g "$TM_RG" \
+  --profile-name "$TM_PROFILE" \
+  --name ep-jpe-dr-lb \
+  --type azureEndpoints \
+  --endpoint-status Disabled
+```
+
+일본 VM 중지:
+
+```bash
+az vm deallocate -g "$DR_RG" -n "$DR_VM"
+```
+
+### 13.7 삭제
+
+Failover Commit 이후에는 ASR protected item 때문에 Vault 삭제가 막힐 수 있습니다. 먼저 서울 VM을 running 상태로 만든 후 보호 항목을 제거합니다.
+
+```bash
+az vm start -g "$PRIMARY_RG" -n "$PRIMARY_VM"
+
+az site-recovery protected-item remove \
+  -g "$DR_RG" \
+  --vault-name "$VAULT" \
+  --fabric-name asr-fabric-krc \
+  --protection-container asr-pc-krc \
+  -n asr-vm-asr-test01-web01
+```
+
+그 후 Terraform state 정리와 destroy를 수행합니다.
+
+```bash
+terraform state rm azurerm_site_recovery_replicated_vm.primary 2>/dev/null || true
+terraform destroy -auto-approve
+```
+
+남은 리소스 그룹 삭제:
+
+```bash
+az group delete --name rg-asr-test01-krc --yes --no-wait
+az group delete --name rg-asr-test01-jpe --yes --no-wait
+```
+
+---
+
+## Final note
+
+This repository intentionally documents both the successful path and the failed CLI experiments. The failures are useful because ASR operations often depend on provider versions, VM power state, OS kernel compatibility, and Site Recovery CLI extension schemas. For production-grade failback, prefer the Azure Portal or a thoroughly tested automation runbook for Re-protect and Planned Failover.
