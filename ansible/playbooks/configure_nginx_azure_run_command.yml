@@ -1,0 +1,36 @@
+---
+- name: Configure nginx application on Azure VM through Run Command
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    resource_group: ""
+    vm_name: ""
+    role_label: "Korea Central PRIMARY"
+
+  tasks:
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - resource_group | length > 0
+          - vm_name | length > 0
+        fail_msg: "resource_group and vm_name are required."
+
+    - name: Configure nginx through Azure VM Run Command
+      ansible.builtin.command:
+        argv:
+          - az
+          - vm
+          - run-command
+          - invoke
+          - --resource-group
+          - "{{ resource_group }}"
+          - --name
+          - "{{ vm_name }}"
+          - --command-id
+          - RunShellScript
+          - --scripts
+          - "{{ lookup('template', '../templates/configure_nginx.sh.j2') }}"
+          - -o
+          - table
+      changed_when: true
