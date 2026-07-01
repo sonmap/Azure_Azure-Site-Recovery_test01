@@ -276,10 +276,12 @@ resource "azurerm_linux_virtual_machine" "primary" {
     storage_account_type = "Premium_LRS"
   }
 
+  # Ubuntu 20.04 LTS Gen2 is used intentionally for this ASR lab.
+  # During validation, the Ubuntu 22.04 latest image booted with kernel 6.8.x and ASR Mobility Service rejected it.
   source_image_reference {
     publisher = "Canonical"
-    offer     = "0001-com-ubuntu-server-jammy"
-    sku       = "22_04-lts-gen2"
+    offer     = "0001-com-ubuntu-server-focal"
+    sku       = "20_04-lts-gen2"
     version   = "latest"
   }
 
