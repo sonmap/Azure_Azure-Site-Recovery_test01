@@ -1,0 +1,18 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+.terraform.lock.hcl
+
+# Local variables / secrets
+terraform.tfvars
+*.auto.tfvars
+*.auto.tfvars.json
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
