@@ -16,9 +16,12 @@ ssh_public_key = "ssh-rsa AAAA_REPLACE_ME sonmap@example"
 
 # Replace with your office/home public IP CIDR for SSH.
 # Example: "203.0.113.10/32"
-admin_source_cidr = "0.0.0.0/0"
+# Avoid 0.0.0.0/0 except in a short-lived isolated lab.
+admin_source_cidr = "203.0.113.10/32"
 
-vm_size = "Standard_B2s"
+# Standard_B2s was unavailable in Korea Central during validation.
+# Standard_D2s_v3 was used successfully for this lab.
+vm_size = "Standard_D2s_v3"
 
 # Must be globally unique under trafficmanager.net.
 traffic_manager_relative_name = "sonmap-asr-test01"
