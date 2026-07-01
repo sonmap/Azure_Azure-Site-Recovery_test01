@@ -60,7 +60,7 @@ variable "admin_source_cidr" {
 variable "vm_size" {
   description = "Primary VM size. ASR failover uses same or closest available size in DR region."
   type        = string
-  default     = "Standard_B2s"
+  default     = "Standard_D2s_v3"
 }
 
 variable "traffic_manager_relative_name" {
