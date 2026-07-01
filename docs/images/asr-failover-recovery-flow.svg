@@ -1,0 +1,169 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="850" viewBox="0 0 1400 850">
+  <defs>
+    <style>
+      .title { font: 700 34px Arial, sans-serif; fill: #172554; }
+      .subtitle { font: 600 18px Arial, sans-serif; fill: #334155; }
+      .panel-title { font: 700 22px Arial, sans-serif; fill: #ffffff; }
+      .step-title { font: 700 16px Arial, sans-serif; fill: #0f172a; }
+      .text { font: 14px Arial, sans-serif; fill: #334155; }
+      .small { font: 13px Arial, sans-serif; fill: #475569; }
+      .num { font: 700 18px Arial, sans-serif; fill: #ffffff; }
+      .box { fill: #ffffff; stroke-width: 1.5; rx: 12; }
+    </style>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#2563eb"/></marker>
+    <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#dc2626"/></marker>
+    <marker id="arrow-green" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#16a34a"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="1400" height="850" fill="#ffffff"/>
+  <text x="35" y="52" class="title">Azure Site Recovery Failover Test and Recovery Flow</text>
+  <text x="35" y="84" class="subtitle">Korea Central → Japan East DR Lab | 장애조치 테스트 및 복구 절차</text>
+
+  <rect x="30" y="115" width="420" height="570" rx="18" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <rect x="30" y="115" width="420" height="54" rx="18" fill="#2563eb"/>
+  <text x="82" y="151" class="panel-title">1. Test Failover - Non-disruptive</text>
+  <text x="72" y="190" class="small">운영 서비스 영향 없이 DR 동작을 검증합니다.</text>
+
+  <g transform="translate(55,215)">
+    <rect width="360" height="56" class="box" stroke="#93c5fd"/>
+    <circle cx="28" cy="28" r="18" fill="#2563eb"/><text x="23" y="34" class="num">1</text>
+    <text x="62" y="25" class="step-title">Normal operation</text>
+    <text x="62" y="45" class="small">Client → Traffic Manager → Korea Central LB → VM</text>
+  </g>
+  <line x1="235" y1="271" x2="235" y2="294" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-blue)"/>
+
+  <g transform="translate(55,300)">
+    <rect width="360" height="56" class="box" stroke="#93c5fd"/>
+    <circle cx="28" cy="28" r="18" fill="#2563eb"/><text x="23" y="34" class="num">2</text>
+    <text x="62" y="25" class="step-title">Run Test Failover in Recovery Vault</text>
+    <text x="62" y="45" class="small">Recovery point: latest processed</text>
+  </g>
+  <line x1="235" y1="356" x2="235" y2="379" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-blue)"/>
+
+  <g transform="translate(55,385)">
+    <rect width="360" height="56" class="box" stroke="#93c5fd"/>
+    <circle cx="28" cy="28" r="18" fill="#2563eb"/><text x="23" y="34" class="num">3</text>
+    <text x="62" y="25" class="step-title">Temporary Japan East VM is created</text>
+    <text x="62" y="45" class="small">No production cutover yet</text>
+  </g>
+  <line x1="235" y1="441" x2="235" y2="464" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-blue)"/>
+
+  <g transform="translate(55,470)">
+    <rect width="360" height="68" class="box" stroke="#93c5fd"/>
+    <circle cx="28" cy="34" r="18" fill="#2563eb"/><text x="23" y="40" class="num">4</text>
+    <text x="62" y="27" class="step-title">Attach DR VM NIC to Japan LB pool</text>
+    <text x="62" y="49" class="small">scripts/attach_recovered_vm_to_jpe_lb.sh</text>
+  </g>
+  <line x1="235" y1="538" x2="235" y2="561" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-blue)"/>
+
+  <g transform="translate(55,567)">
+    <rect width="360" height="56" class="box" stroke="#93c5fd"/>
+    <circle cx="28" cy="28" r="18" fill="#2563eb"/><text x="23" y="34" class="num">5</text>
+    <text x="62" y="25" class="step-title">Validate Japan LB /health</text>
+    <text x="62" y="45" class="small">Then cleanup Test Failover</text>
+  </g>
+
+  <rect x="490" y="115" width="420" height="570" rx="18" fill="#fff1f2" stroke="#dc2626" stroke-width="2"/>
+  <rect x="490" y="115" width="420" height="54" rx="18" fill="#dc2626"/>
+  <text x="552" y="151" class="panel-title">2. Real Failover - Disruptive</text>
+  <text x="532" y="190" class="small">실제 DR 전환입니다. Commit 후 운영 위치가 DR로 확정됩니다.</text>
+
+  <g transform="translate(515,215)">
+    <rect width="360" height="56" class="box" stroke="#fca5a5"/>
+    <circle cx="28" cy="28" r="18" fill="#dc2626"/><text x="23" y="34" class="num">1</text>
+    <text x="62" y="25" class="step-title">Run Failover in Recovery Vault</text>
+    <text x="62" y="45" class="small">Unplanned or planned depending on scenario</text>
+  </g>
+  <line x1="695" y1="271" x2="695" y2="294" stroke="#dc2626" stroke-width="3" marker-end="url(#arrow-red)"/>
+
+  <g transform="translate(515,300)">
+    <rect width="360" height="56" class="box" stroke="#fca5a5"/>
+    <circle cx="28" cy="28" r="18" fill="#dc2626"/><text x="23" y="34" class="num">2</text>
+    <text x="62" y="25" class="step-title">Japan East DR VM powers on</text>
+    <text x="62" y="45" class="small">Example: asr-vm-asr-test01-web01</text>
+  </g>
+  <line x1="695" y1="356" x2="695" y2="379" stroke="#dc2626" stroke-width="3" marker-end="url(#arrow-red)"/>
+
+  <g transform="translate(515,385)">
+    <rect width="360" height="68" class="box" stroke="#fca5a5"/>
+    <circle cx="28" cy="34" r="18" fill="#dc2626"/><text x="23" y="40" class="num">3</text>
+    <text x="62" y="27" class="step-title">Attach DR VM to Japan LB backend pool</text>
+    <text x="62" y="49" class="small">Required because ASR-created NIC is not in the pool</text>
+  </g>
+  <line x1="695" y1="453" x2="695" y2="476" stroke="#dc2626" stroke-width="3" marker-end="url(#arrow-red)"/>
+
+  <g transform="translate(515,482)">
+    <rect width="360" height="56" class="box" stroke="#fca5a5"/>
+    <circle cx="28" cy="28" r="18" fill="#dc2626"/><text x="23" y="34" class="num">4</text>
+    <text x="62" y="25" class="step-title">Traffic Manager routes to Japan East</text>
+    <text x="62" y="45" class="small">Primary unhealthy or disabled, DR healthy</text>
+  </g>
+  <line x1="695" y1="538" x2="695" y2="561" stroke="#dc2626" stroke-width="3" marker-end="url(#arrow-red)"/>
+
+  <g transform="translate(515,567)">
+    <rect width="360" height="56" class="box" stroke="#fca5a5"/>
+    <circle cx="28" cy="28" r="18" fill="#dc2626"/><text x="23" y="34" class="num">5</text>
+    <text x="62" y="25" class="step-title">Commit Failover</text>
+    <text x="62" y="45" class="small">State: UnplannedFailoverCommitted / Normal</text>
+  </g>
+
+  <rect x="950" y="115" width="420" height="570" rx="18" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+  <rect x="950" y="115" width="420" height="54" rx="18" fill="#16a34a"/>
+  <text x="1017" y="151" class="panel-title">3. Recovery / Return to Primary</text>
+  <text x="992" y="190" class="small">권장: 정식 Failback. 실습: 수동 서울 복귀도 가능.</text>
+
+  <g transform="translate(975,215)">
+    <rect width="360" height="58" class="box" stroke="#86efac"/>
+    <circle cx="28" cy="29" r="18" fill="#16a34a"/><text x="23" y="35" class="num">1</text>
+    <text x="62" y="25" class="step-title">Official: Re-protect JPE → KRC</text>
+    <text x="62" y="45" class="small">Use Portal if CLI provider schema is difficult</text>
+  </g>
+  <line x1="1155" y1="273" x2="1155" y2="296" stroke="#16a34a" stroke-width="3" marker-end="url(#arrow-green)"/>
+
+  <g transform="translate(975,302)">
+    <rect width="360" height="58" class="box" stroke="#86efac"/>
+    <circle cx="28" cy="29" r="18" fill="#16a34a"/><text x="23" y="35" class="num">2</text>
+    <text x="62" y="25" class="step-title">Wait for Protected / Normal</text>
+    <text x="62" y="45" class="small">Reverse replication must be healthy</text>
+  </g>
+  <line x1="1155" y1="360" x2="1155" y2="383" stroke="#16a34a" stroke-width="3" marker-end="url(#arrow-green)"/>
+
+  <g transform="translate(975,389)">
+    <rect width="360" height="58" class="box" stroke="#86efac"/>
+    <circle cx="28" cy="29" r="18" fill="#16a34a"/><text x="23" y="35" class="num">3</text>
+    <text x="62" y="25" class="step-title">Planned Failover back to Korea</text>
+    <text x="62" y="45" class="small">Then Commit and Re-protect KRC → JPE</text>
+  </g>
+
+  <line x1="1155" y1="457" x2="1155" y2="480" stroke="#16a34a" stroke-width="3" marker-end="url(#arrow-green)"/>
+
+  <g transform="translate(975,486)">
+    <rect width="360" height="58" class="box" stroke="#86efac"/>
+    <circle cx="28" cy="29" r="18" fill="#16a34a"/><text x="23" y="35" class="num">4</text>
+    <text x="62" y="25" class="step-title">Lab manual return option</text>
+    <text x="62" y="45" class="small">Start Korea VM and nginx</text>
+  </g>
+  <line x1="1155" y1="544" x2="1155" y2="567" stroke="#16a34a" stroke-width="3" marker-end="url(#arrow-green)"/>
+
+  <g transform="translate(975,573)">
+    <rect width="360" height="70" class="box" stroke="#86efac"/>
+    <circle cx="28" cy="35" r="18" fill="#16a34a"/><text x="23" y="41" class="num">5</text>
+    <text x="62" y="28" class="step-title">TM Korea enabled / Japan disabled</text>
+    <text x="62" y="50" class="small">Validate FQDN, then deallocate Japan VM</text>
+  </g>
+
+  <rect x="40" y="710" width="405" height="100" rx="16" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="70" y="742" class="step-title">Test Failover result</text>
+  <text x="70" y="768" class="text">• Non-disruptive DR validation</text>
+  <text x="70" y="790" class="text">• Cleanup test failover deletes temporary VM</text>
+
+  <rect x="498" y="710" width="405" height="100" rx="16" fill="#fff1f2" stroke="#dc2626"/>
+  <text x="528" y="742" class="step-title">Real Failover result</text>
+  <text x="528" y="768" class="text">• Production direction changes to Japan East</text>
+  <text x="528" y="790" class="text">• Commit is required after validation</text>
+
+  <rect x="956" y="710" width="405" height="100" rx="16" fill="#f0fdf4" stroke="#16a34a"/>
+  <text x="986" y="742" class="step-title">Recovery recommendation</text>
+  <text x="986" y="768" class="text">• Production: Re-protect + Planned Failover</text>
+  <text x="986" y="790" class="text">• Lab: manual service return can be used</text>
+</svg>
