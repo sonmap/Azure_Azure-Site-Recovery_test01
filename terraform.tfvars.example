@@ -1,0 +1,30 @@
+# Copy this file to terraform.tfvars and edit values.
+
+prefix           = "asr-test01"
+primary_location = "koreacentral"
+dr_location      = "japaneast"
+
+primary_vnet_cidr   = "10.10.0.0/24"
+primary_subnet_cidr = "10.10.0.0/26"
+dr_vnet_cidr        = "10.20.0.0/24"
+dr_subnet_cidr      = "10.20.0.0/26"
+
+admin_username = "azureuser"
+
+# Replace this with your real public SSH key.
+ssh_public_key = "ssh-rsa AAAA_REPLACE_ME sonmap@example"
+
+# Replace with your office/home public IP CIDR for SSH.
+# Example: "203.0.113.10/32"
+admin_source_cidr = "0.0.0.0/0"
+
+vm_size = "Standard_B2s"
+
+# Must be globally unique under trafficmanager.net.
+traffic_manager_relative_name = "sonmap-asr-test01"
+
+tags = {
+  project = "Azure_Azure-Site-Recovery_test01"
+  owner   = "sonmap"
+  purpose = "asr-dr-lab"
+}
