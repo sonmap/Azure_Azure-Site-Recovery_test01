@@ -261,9 +261,6 @@ resource "azurerm_linux_virtual_machine" "primary" {
   network_interface_ids = [
     azurerm_network_interface.primary_vm.id
   ]
-  custom_data = base64encode(templatefile("${path.module}/cloud-init/nginx.yaml", {
-    role_label = "Korea Central PRIMARY"
-  }))
   tags = merge(var.tags, {
     role = "primary-nginx"
   })
@@ -415,6 +412,7 @@ resource "azurerm_site_recovery_replicated_vm" "primary" {
   target_resource_group_id                  = azurerm_resource_group.dr.id
   target_recovery_fabric_id                 = azurerm_site_recovery_fabric.dr.id
   target_recovery_protection_container_id   = azurerm_site_recovery_protection_container.dr.id
+  target_network_id                         = azurerm_virtual_network.dr.id
 
   managed_disk {
     disk_id                    = azurerm_linux_virtual_machine.primary.os_disk[0].id
