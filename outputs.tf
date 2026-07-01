@@ -38,6 +38,16 @@ output "recovery_services_vault_name" {
   value       = azurerm_recovery_services_vault.dr.name
 }
 
+output "primary_lb_name" {
+  description = "Korea Central Public Load Balancer name. Useful for manual restore and backend pool checks."
+  value       = azurerm_lb.primary.name
+}
+
+output "primary_lb_backend_pool_name" {
+  description = "Korea Central LB backend pool name. Useful for manual restore and backend pool checks."
+  value       = azurerm_lb_backend_address_pool.primary.name
+}
+
 output "dr_lb_name" {
   description = "Japan East Public Load Balancer name."
   value       = azurerm_lb.dr.name
