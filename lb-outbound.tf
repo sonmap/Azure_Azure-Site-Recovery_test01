@@ -1,6 +1,8 @@
 # Standard Public Load Balancer outbound rules.
-# These allow the primary VM to reach Ubuntu package repositories during cloud-init.
-# The DR rule is ready for the recovered VM after its NIC is attached to the DR backend pool.
+#
+# Standard Public Load Balancer does not provide default outbound internet access.
+# These outbound rules allow the primary VM, and later an ASR-recovered DR VM after NIC backend-pool attachment,
+# to reach Ubuntu package repositories and Azure endpoints during Ansible Run Command based configuration.
 
 resource "azurerm_lb_outbound_rule" "primary" {
   name                    = "outbound-internet"
