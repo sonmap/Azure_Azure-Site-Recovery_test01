@@ -218,6 +218,7 @@ resource "azurerm_lb_rule" "primary_http" {
   frontend_ip_configuration_name = "fe-krc"
   backend_address_pool_ids       = [azurerm_lb_backend_address_pool.primary.id]
   probe_id                       = azurerm_lb_probe.primary_http.id
+  disable_outbound_snat          = true
 }
 
 resource "azurerm_lb_rule" "dr_http" {
@@ -229,6 +230,7 @@ resource "azurerm_lb_rule" "dr_http" {
   frontend_ip_configuration_name = "fe-jpe"
   backend_address_pool_ids       = [azurerm_lb_backend_address_pool.dr.id]
   probe_id                       = azurerm_lb_probe.dr_http.id
+  disable_outbound_snat          = true
 }
 
 resource "azurerm_network_interface" "primary_vm" {
@@ -354,6 +356,10 @@ resource "azurerm_site_recovery_fabric" "dr" {
   resource_group_name = azurerm_resource_group.dr.name
   recovery_vault_name = azurerm_recovery_services_vault.dr.name
   location            = azurerm_resource_group.dr.location
+
+  depends_on = [
+    azurerm_site_recovery_fabric.primary
+  ]
 }
 
 resource "azurerm_site_recovery_protection_container" "primary" {
