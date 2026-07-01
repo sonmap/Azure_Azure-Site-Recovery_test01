@@ -1,12 +1,24 @@
 # Azure Site Recovery DR Lab - Korea Central to Japan East
 
-> Main language: English. Korean translation and notes are included after the English runbook.
+> Main language: English. Korean guide is included near the end.
 
-This repository is a hands-on Azure Site Recovery lab for validating VM disaster recovery from Korea Central to Japan East. It provisions a small web workload, exposes it through Azure Standard Public Load Balancers, uses Azure Traffic Manager Priority routing for the same external URL, and enables Azure Site Recovery replication for a Linux VM.
+This repository is a hands-on Azure Site Recovery lab for validating VM disaster recovery from Korea Central to Japan East. It provisions a small nginx workload, exposes it through Azure Standard Public Load Balancers, keeps the same service URL with Azure Traffic Manager Priority routing, and protects the Linux VM with Azure Site Recovery.
 
-The lab was validated through normal service access, ASR Test Failover, real Failover, manual backend pool attachment, Traffic Manager endpoint control, Failover Commit, and cleanup attempts. The README also documents the important troubleshooting findings from the lab.
+The lab was validated through normal service access, ASR Test Failover, real Failover, manual backend pool attachment, Traffic Manager endpoint control, Failover Commit, manual return to Korea Central, and cleanup attempts.
 
-> Important: This is a learning and test repository. It is not a production landing zone. Production use requires private access design, WAF or Application Gateway, managed identity hardening, monitoring, alerting, backup policy, access control, and a formal failback procedure.
+> Important: This is a learning and test repository. It is not a production landing zone. Production use requires private access design, WAF or Application Gateway, managed identity hardening, monitoring, alerting, backup policy, access control, and a formal failback runbook.
+
+---
+
+## Visual diagrams
+
+### Architecture diagram
+
+![Azure Site Recovery DR Architecture](docs/images/asr-dr-architecture.svg)
+
+### Failover test and recovery flow
+
+![Azure Site Recovery Failover and Recovery Flow](docs/images/asr-failover-recovery-flow.svg)
 
 ---
 
@@ -21,7 +33,7 @@ The lab was validated through normal service access, ASR Test Failover, real Fai
 - [7. Normal service validation](#7-normal-service-validation)
 - [8. ASR Test Failover runbook](#8-asr-test-failover-runbook)
 - [9. Real Failover runbook](#9-real-failover-runbook)
-- [10. Manual return to Korea Central](#10-manual-return-to-korea-central)
+- [10. Recovery and return to Korea Central](#10-recovery-and-return-to-korea-central)
 - [11. Cleanup and deletion](#11-cleanup-and-deletion)
 - [12. Troubleshooting notes from the lab](#12-troubleshooting-notes-from-the-lab)
 - [13. Korean guide](#13-korean-guide)
@@ -30,56 +42,41 @@ The lab was validated through normal service access, ASR Test Failover, real Fai
 
 ## 1. Architecture overview
 
-### 1.1 Normal state
+The target architecture is simple and intentionally clear for DR testing.
 
-```mermaid
-flowchart TB
-    U[Client or test browser] --> TM[Azure Traffic Manager<br/>Priority routing<br/>same FQDN]
-    TM --> KRC_LB[Korea Central<br/>Standard Public Load Balancer]
-    KRC_LB --> KRC_VM[Korea Central Linux VM<br/>nginx health endpoint]
+```text
+Normal operation
+Client
+  -> Azure Traffic Manager FQDN
+  -> Korea Central Standard Public Load Balancer
+  -> Korea Central Linux VM / nginx
 
-    subgraph KRC[Korea Central - Primary]
-      KRC_LB
-      KRC_VM
-      KRC_VNET[VNet and web subnet]
-    end
-
-    subgraph RSV[Recovery Services Vault]
-      ASR[ASR replication policy<br/>fabric / container / mapping]
-    end
-
-    KRC_VM -. replicated by ASR .-> ASR
+DR operation after Test Failover or Failover
+Client
+  -> Azure Traffic Manager FQDN
+  -> Japan East Standard Public Load Balancer
+  -> ASR recovered Japan East VM / nginx
 ```
 
-In the normal state, the public URL resolves to the Korea Central Load Balancer. The backend VM serves nginx on port 80 and exposes `/health` for both Load Balancer and Traffic Manager monitoring.
-
-### 1.2 DR state after ASR Test Failover or Failover
-
-```mermaid
-flowchart TB
-    U[Client or test browser] --> TM[Azure Traffic Manager<br/>same FQDN]
-    TM --> JPE_LB[Japan East<br/>Standard Public Load Balancer]
-    JPE_LB --> JPE_VM[ASR recovered VM<br/>no public IP<br/>private backend only]
-
-    subgraph JPE[Japan East - DR]
-      JPE_LB
-      JPE_VM
-      JPE_VNET[VNet and web subnet]
-    end
-```
-
-The recovered Japan East VM does not require a public IP. It is reached through the Japan East Standard Public Load Balancer. After ASR creates the recovered VM, its NIC must be attached to the Japan East LB backend pool.
-
-### 1.3 Traffic Manager behavior
+Traffic Manager is DNS-based. It is not an HTTP proxy. After DNS resolution, user traffic goes directly to the public IP returned by Traffic Manager.
 
 ```mermaid
 flowchart LR
-    DNS[Client DNS query] --> TM[Traffic Manager profile]
-    TM -->|Priority 1 and healthy| KRC[Primary endpoint<br/>Korea Central LB public IP]
-    TM -->|Primary disabled or unhealthy| JPE[DR endpoint<br/>Japan East LB public IP]
+    Client[Client] --> TM[Azure Traffic Manager<br/>Priority routing]
+    TM -->|Priority 1 / Healthy| KRC[Korea Central Public LB]
+    TM -->|Primary disabled or unhealthy| JPE[Japan East Public LB]
+    KRC --> KRCVM[Korea Central VM / nginx]
+    JPE --> JPEVM[ASR recovered DR VM / nginx]
 ```
 
-Traffic Manager is DNS-based. It is not an HTTP proxy and it does not sit in the data path after DNS resolution. The user traffic goes directly to the returned public IP address.
+Key design points:
+
+- Azure Standard Public Load Balancer is used, not Application Gateway.
+- The recovered DR VM does not need a public IP.
+- After ASR creates the recovered VM, the recovered VM NIC must be attached to the Japan East LB backend pool.
+- Terraform provisions infrastructure and ASR.
+- Ansible through Azure VM Run Command configures nginx.
+- Ubuntu 20.04 LTS Gen2 is used because Ubuntu 22.04 latest with a 6.8 Azure kernel caused ASR Mobility Service compatibility issues during validation.
 
 ---
 
@@ -100,13 +97,6 @@ Traffic Manager is DNS-based. It is not an HTTP proxy and it does not sit in the
 | ASR | Replicated VM | Korea Central to Japan East | Main protected item |
 | Automation | Ansible Run Command | Control machine to Azure VM | Installs nginx and writes health page |
 
-### Important implementation choices
-
-- The lab uses Azure Standard Public Load Balancer, not Application Gateway.
-- Standard LB outbound rules are included because Standard LB does not provide default outbound internet access.
-- The VM image is Ubuntu 20.04 LTS Gen2 on purpose. During validation, Ubuntu 22.04 latest booted with a 6.8 Azure kernel and ASR Mobility Service rejected that kernel.
-- Terraform provisions infrastructure and ASR. Application setup is intentionally handled by Ansible, not cloud-init.
-
 ---
 
 ## 3. Repository layout
@@ -119,8 +109,10 @@ Traffic Manager is DNS-based. It is not an HTTP proxy and it does not sit in the
 ├── outputs.tf
 ├── versions.tf
 ├── terraform.tfvars.example
-├── cloud-init/
-│   └── nginx.yaml
+├── docs/
+│   └── images/
+│       ├── asr-dr-architecture.svg
+│       └── asr-failover-recovery-flow.svg
 ├── ansible/
 │   ├── playbooks/
 │   │   └── configure_nginx_azure_run_command.yml
@@ -135,7 +127,7 @@ Traffic Manager is DNS-based. It is not an HTTP proxy and it does not sit in the
 └── RUNBOOK-ANSIBLE.md
 ```
 
-`cloud-init/nginx.yaml` is kept as a historical reference, but the current validated path is Ansible through Azure VM Run Command.
+`cloud-init/nginx.yaml` may exist as an older reference, but the validated path is Ansible through Azure VM Run Command.
 
 ---
 
@@ -188,7 +180,7 @@ traffic_manager_relative_name = "sonmap-asr-test01"
 vm_size = "Standard_D2s_v3"
 ```
 
-If you do not have a stable public admin IP for SSH, keep SSH access limited to your trusted private or corporate range. Avoid `0.0.0.0/0` for SSH.
+Avoid `0.0.0.0/0` for SSH except in a short-lived isolated lab.
 
 ---
 
@@ -219,7 +211,7 @@ dr_lb_name
 dr_lb_backend_pool_name
 ```
 
-During validation, an example deployment produced values similar to:
+Example values observed during the lab:
 
 ```text
 Primary LB IP: 20.200.209.69
@@ -235,7 +227,7 @@ Actual values change per deployment.
 
 ## 6. Configure nginx with Ansible
 
-The Terraform VM does not use cloud-init for the application. Configure nginx after provisioning.
+The Terraform VM does not rely on cloud-init for application setup. Configure nginx after provisioning.
 
 ```bash
 chmod +x scripts/*.sh
@@ -297,7 +289,9 @@ az site-recovery protected-item list \
 
 ## 8. ASR Test Failover runbook
 
-Use Test Failover first for DR drills. Test Failover creates a temporary DR VM and does not commit production failover.
+Test Failover should be used first for DR drills. It creates a temporary DR VM and does not commit production failover.
+
+![Azure Site Recovery Failover and Recovery Flow](docs/images/asr-failover-recovery-flow.svg)
 
 Portal path:
 
@@ -308,7 +302,7 @@ Recovery Services vault
   -> Test failover
 ```
 
-Use:
+Recommended choices:
 
 ```text
 Target region: Japan East
@@ -390,14 +384,14 @@ Real Failover is not a drill. It creates the actual DR VM and changes the ASR pr
 
 High-level flow:
 
-```mermaid
-flowchart TB
-    A[Start real Failover] --> B[Japan East VM created]
-    B --> C[Attach recovered NIC to Japan LB backend pool]
-    C --> D[Validate Japan LB health]
-    D --> E[Traffic Manager routes to Japan]
-    E --> F[Failover Commit]
-    F --> G[Japan East becomes committed DR operating side]
+```text
+1. Start real Failover
+2. Japan East VM is created
+3. Attach recovered VM NIC to Japan LB backend pool
+4. Validate Japan LB /health
+5. Switch Traffic Manager or allow health-based priority routing
+6. Commit Failover
+7. Japan East becomes the committed active side
 ```
 
 Portal path:
@@ -407,13 +401,6 @@ Recovery Services vault
   -> Replicated items
   -> asr-vm-asr-test01-web01
   -> Failover
-```
-
-Recommended lab choices:
-
-```text
-Recovery point: Latest processed
-Shut down source VM before failover: lab dependent
 ```
 
 After Failover, the DR VM name observed in this lab was:
@@ -447,7 +434,7 @@ az site-recovery protected-item failover-commit \
   -n "$ITEM_NAME"
 ```
 
-In this lab, Commit completed successfully and the protected item reached:
+Observed successful state:
 
 ```text
 State  = UnplannedFailoverCommitted
@@ -456,26 +443,22 @@ Health = Normal
 
 ---
 
-## 10. Manual return to Korea Central
+## 10. Recovery and return to Korea Central
 
-A formal ASR failback requires Re-protect from Japan East to Korea Central, wait for Healthy replication, Planned Failover back to Korea, Commit, and then Re-protect again from Korea to Japan.
+A formal ASR failback requires this sequence:
 
-During this lab, Azure CLI `reprotect` provider details were difficult to satisfy because the Site Recovery extension expected a nested `a2-a` schema and disk details. For a clean production-style failback, use the Azure Portal for Re-protect and failback.
-
-For a lab-only manual service return, use the following operational workaround:
-
-```mermaid
-flowchart TB
-    A[Japan East is currently active] --> B[Start Korea Central VM]
-    B --> C[Start or reinstall nginx]
-    C --> D[Ensure Korea VM NIC is in Korea LB backend pool]
-    D --> E[Enable Traffic Manager Korea endpoint]
-    E --> F[Disable Traffic Manager Japan endpoint]
-    F --> G[Validate same FQDN returns Korea]
-    G --> H[Deallocate Japan VM]
+```text
+1. Re-protect from Japan East to Korea Central
+2. Wait until reverse replication becomes Protected / Normal
+3. Planned Failover back to Korea Central
+4. Validate Korea VM, nginx, Korea LB, and Traffic Manager
+5. Commit failback
+6. Re-protect again from Korea Central to Japan East
 ```
 
-Set variables:
+During this lab, Azure CLI `reprotect` provider details were difficult to satisfy because the Site Recovery extension expected a nested `a2-a` schema and disk details. For production-style failback, use Azure Portal Re-protect or a thoroughly tested automation runbook.
+
+For a lab-only manual service return:
 
 ```bash
 cd ~/Azure_Azure-Site-Recovery_test01
@@ -492,7 +475,7 @@ Start Korea VM:
 az vm start -g "$PRIMARY_RG" -n "$PRIMARY_VM"
 ```
 
-Start nginx or reinstall if needed:
+Start or reinstall nginx:
 
 ```bash
 az vm run-command invoke \
@@ -503,7 +486,7 @@ az vm run-command invoke \
   -o table
 ```
 
-Ensure the Korea VM NIC is attached to the Korea LB backend pool:
+Ensure Korea VM NIC is attached to Korea LB backend pool:
 
 ```bash
 NIC_ID=$(az vm show -g "$PRIMARY_RG" -n "$PRIMARY_VM" --query 'networkProfile.networkInterfaces[0].id' -o tsv)
@@ -517,7 +500,7 @@ az network nic ip-config address-pool add \
   --address-pool $(terraform output -raw primary_lb_backend_pool_name) || true
 ```
 
-Fix Traffic Manager endpoint status:
+Switch Traffic Manager back to Korea:
 
 ```bash
 TM_RG="$PRIMARY_RG"
@@ -538,13 +521,6 @@ az network traffic-manager endpoint update \
   --endpoint-status Disabled
 ```
 
-If the CLI misinterprets `--profile-name`, set the variables explicitly:
-
-```bash
-TM_RG=rg-asr-test01-krc
-TM_PROFILE=tm-asr-test01-dk9p9
-```
-
 Validate Korea service:
 
 ```bash
@@ -563,7 +539,7 @@ az vm deallocate -g "$DR_RG" -n "$DR_VM"
 
 ## 11. Cleanup and deletion
 
-### 11.1 Standard cleanup after Test Failover
+### Standard cleanup after Test Failover
 
 ```text
 Recovery Services vault
@@ -572,9 +548,9 @@ Recovery Services vault
   -> Cleanup test failover
 ```
 
-### 11.2 Delete lab after real Failover Commit
+### Delete lab after real Failover Commit
 
-If the protected item cannot be removed because the source VM is deallocated, start the Korea VM first:
+If protected item removal fails because the source VM is deallocated, start the Korea VM first:
 
 ```bash
 PRIMARY_RG=$(terraform output -raw primary_resource_group_name)
@@ -582,7 +558,7 @@ PRIMARY_VM=$(terraform output -raw primary_vm_name)
 az vm start -g "$PRIMARY_RG" -n "$PRIMARY_VM"
 ```
 
-Then try to remove the ASR protected item:
+Remove the ASR protected item:
 
 ```bash
 DR_RG=$(terraform output -raw dr_resource_group_name)
@@ -597,7 +573,7 @@ az site-recovery protected-item remove \
   -n "$ITEM_NAME"
 ```
 
-If remove fails and this is only a lab, use forced delete:
+If this is only a lab and remove fails, use forced delete:
 
 ```bash
 az site-recovery protected-item delete \
@@ -608,7 +584,7 @@ az site-recovery protected-item delete \
   -n "$ITEM_NAME"
 ```
 
-Then remove the ASR replicated VM from Terraform state and destroy:
+Then remove ASR replicated VM from Terraform state and destroy:
 
 ```bash
 terraform state rm azurerm_site_recovery_replicated_vm.primary 2>/dev/null || true
@@ -646,7 +622,7 @@ false
 
 ## 12. Troubleshooting notes from the lab
 
-### 12.1 Git clone could not resolve github.com
+### Git clone could not resolve github.com
 
 Symptom:
 
@@ -664,11 +640,11 @@ cat /etc/resolv.conf
 curl -I https://github.com
 ```
 
-### 12.2 `test_subnet_name` unsupported
+### `test_subnet_name` unsupported
 
 The AzureRM provider did not support `test_subnet_name` for `azurerm_site_recovery_replicated_vm`. Remove that argument.
 
-### 12.3 Standard LB outbound rule required `disable_outbound_snat = true`
+### Standard LB outbound rule required `disable_outbound_snat = true`
 
 When the same frontend IP configuration is referenced by an outbound rule, the inbound LB rule must disable outbound SNAT.
 
@@ -676,7 +652,7 @@ When the same frontend IP configuration is referenced by an outbound rule, the i
 disable_outbound_snat = true
 ```
 
-### 12.4 VM SKU unavailable in Korea Central
+### VM SKU unavailable in Korea Central
 
 `Standard_B2s` was not available in Korea Central during validation. Use:
 
@@ -684,11 +660,11 @@ disable_outbound_snat = true
 vm_size = "Standard_D2s_v3"
 ```
 
-### 12.5 ASR Mobility Service rejected Ubuntu 22.04 latest kernel
+### ASR Mobility Service rejected Ubuntu 22.04 latest kernel
 
 ASR failed with a 539 error because the Mobility Service version did not support the source VM kernel `6.8.0-1059-azure`. The lab was changed to Ubuntu 20.04 LTS Gen2.
 
-### 12.6 DR VM has no public IP
+### DR VM has no public IP
 
 This is expected. Use the Japan East Load Balancer public IP:
 
@@ -696,7 +672,7 @@ This is expected. Use the Japan East Load Balancer public IP:
 curl -v http://$(terraform output -raw jpe_lb_public_ip)/health
 ```
 
-### 12.7 Failover Commit CLI option
+### Failover Commit CLI option
 
 The correct option in the tested CLI extension was `-n` or `--replicated-protected-item-name`.
 
@@ -709,11 +685,11 @@ az site-recovery protected-item failover-commit \
   -n asr-vm-asr-test01-web01
 ```
 
-### 12.8 Re-protect CLI schema issues
+### Re-protect CLI schema issues
 
 The CLI extension reported `a2-a` as the expected provider details object. Manual JSON attempts may still fail depending on extension version. Portal Re-protect is recommended for this lab.
 
-### 12.9 Disable replication failed because VM was deallocated
+### Disable replication failed because VM was deallocated
 
 Symptom:
 
@@ -729,7 +705,7 @@ az vm start -g "$PRIMARY_RG" -n "$PRIMARY_VM"
 
 Then retry ASR remove/delete.
 
-### 12.10 Traffic Manager endpoint update ResourceNotFound
+### Traffic Manager endpoint update ResourceNotFound
 
 If the error path contains `trafficmanagerprofiles/azureEndpoints`, the `TM_PROFILE` variable is probably empty. Set it explicitly.
 
@@ -746,26 +722,20 @@ TM_PROFILE=tm-asr-test01-dk9p9
 
 이 저장소는 Azure Site Recovery를 이용해 Korea Central VM을 Japan East로 복제하고, 장애 시 같은 URL로 DR 리전에 접속되는지 확인하기 위한 실습용 Terraform/Ansible 예제입니다.
 
-핵심 구조는 아래와 같습니다.
-
 ```text
-사용자
-  -> Azure Traffic Manager
-  -> Korea Central Public Load Balancer
-  -> Korea Central VM / nginx
+정상 운영
+사용자 -> Traffic Manager -> Korea Central LB -> Korea Central VM
 
 장애 또는 Failover 후
-사용자
-  -> Azure Traffic Manager
-  -> Japan East Public Load Balancer
-  -> ASR로 생성된 Japan East VM / nginx
+사용자 -> Traffic Manager -> Japan East LB -> ASR로 생성된 Japan East VM
 ```
 
-여기서 LB는 Azure Standard Public Load Balancer입니다. Application Gateway가 아닙니다.
+### 13.2 도식화 이미지
 
-### 13.2 주요 검증 내용
+- `docs/images/asr-dr-architecture.svg`: 전체 ASR DR 아키텍처 구성도
+- `docs/images/asr-failover-recovery-flow.svg`: Failover 테스트 및 복구 절차도
 
-이번 실습에서 확인한 내용입니다.
+### 13.3 주요 검증 내용
 
 ```text
 1. Terraform apply 성공
@@ -783,34 +753,7 @@ TM_PROFILE=tm-asr-test01-dk9p9
 13. 삭제 시 ASR protected item 제거 필요 확인
 ```
 
-### 13.3 실행 순서
-
-```bash
-cp terraform.tfvars.example terraform.tfvars
-vi terraform.tfvars
-
-terraform init
-terraform fmt -recursive
-terraform validate
-terraform plan -out tfplan
-terraform apply tfplan
-```
-
-nginx 설정:
-
-```bash
-chmod +x scripts/*.sh
-./scripts/run_ansible_primary.sh
-```
-
-정상 확인:
-
-```bash
-curl -m 10 -v http://$(terraform output -raw primary_lb_public_ip)/health
-curl -m 10 -v http://$(terraform output -raw traffic_manager_fqdn)/health
-```
-
-### 13.4 Test Failover
+### 13.4 Test Failover 방법
 
 Portal에서 수행합니다.
 
@@ -860,9 +803,20 @@ State  = UnplannedFailoverCommitted
 Health = Normal
 ```
 
-### 13.6 수동으로 서울로 서비스 전환
+### 13.6 복구 방법
 
-ASR 정식 Failback 대신 실습 환경에서 수동으로 서울을 다시 올리는 절차입니다.
+정식 복구는 다음 순서입니다.
+
+```text
+1. Re-protect: Japan East -> Korea Central 역복제
+2. Protected / Normal 상태 확인
+3. Planned Failover to Korea Central
+4. Korea VM, nginx, Korea LB 확인
+5. Failover Commit
+6. Re-protect: Korea Central -> Japan East 재보호
+```
+
+실습 환경에서는 수동으로 서울 서비스를 다시 올릴 수도 있습니다.
 
 ```bash
 PRIMARY_RG=$(terraform output -raw primary_resource_group_name)
@@ -880,7 +834,7 @@ az vm run-command invoke \
   -o table
 ```
 
-Traffic Manager를 서울로 전환:
+Traffic Manager를 서울로 전환합니다.
 
 ```bash
 TM_RG="$PRIMARY_RG"
@@ -940,4 +894,4 @@ az group delete --name rg-asr-test01-jpe --yes --no-wait
 
 ## Final note
 
-This repository intentionally documents both the successful path and the failed CLI experiments. The failures are useful because ASR operations often depend on provider versions, VM power state, OS kernel compatibility, and Site Recovery CLI extension schemas. For production-grade failback, prefer the Azure Portal or a thoroughly tested automation runbook for Re-protect and Planned Failover.
+This repository intentionally documents both successful and failed paths from the lab. The failures are useful because ASR operations often depend on provider versions, VM power state, OS kernel compatibility, and Site Recovery CLI extension schemas. For production-grade failback, prefer Azure Portal Re-protect or a thoroughly tested automation runbook.
