@@ -13,9 +13,7 @@ The lab was validated through normal service access, ASR Test Failover, real Fai
 ## Visual diagrams
 
 ### Architecture diagram
-
-![Uploading image.png…]()
-![Uploading image.png…]()
+<img width="1177" height="787" alt="image" src="https://github.com/user-attachments/assets/01718bc1-8af3-4ad7-b129-c59b08506b06" />
 
 
 ![Azure Site Recovery DR Architecture](docs/images/asr-dr-architecture.svg)
